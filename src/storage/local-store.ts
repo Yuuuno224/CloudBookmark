@@ -1,0 +1,149 @@
+import { openDB, type IDBPDatabase } from 'idb';
+import type { BookmarkNode, SyncState, Tombstone } from '@/types';
+
+const DB_NAME = 'cloudbookmark';
+const DB_VERSION = 1;
+
+interface CloudBookmarkDB {
+  bookmarks: BookmarkNode & { parentId?: string };
+  tombstones: Tombstone;
+  syncMeta: { key: string; value: unknown };
+}
+
+let dbInstance: IDBPDatabase<CloudBookmarkDB> | null = null;
+
+async function getDB(): Promise<IDBPDatabase<CloudBookmarkDB>> {
+  if (dbInstance) return dbInstance;
+  dbInstance = await openDB<CloudBookmarkDB>(DB_NAME, DB_VERSION, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains('bookmarks')) {
+        const store = db.createObjectStore('bookmarks', { keyPath: 'id' });
+        store.createIndex('parentId', 'parentId');
+      }
+      if (!db.objectStoreNames.contains('tombstones')) {
+        db.createObjectStore('tombstones', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('syncMeta')) {
+        db.createObjectStore('syncMeta', { keyPath: 'key' });
+      }
+    },
+  });
+  return dbInstance;
+}
+
+export class LocalStore {
+  async getAllBookmarks(): Promise<BookmarkNode[]> {
+    const db = await getDB();
+    return db.getAll('bookmarks');
+  }
+
+  async getBookmark(id: string): Promise<BookmarkNode | undefined> {
+    const db = await getDB();
+    return db.get('bookmarks', id);
+  }
+
+  async getChildren(parentId: string): Promise<BookmarkNode[]> {
+    const db = await getDB();
+    return db.getAllFromIndex('bookmarks', 'parentId', parentId);
+  }
+
+  async putBookmark(node: BookmarkNode): Promise<void> {
+    const db = await getDB();
+    await db.put('bookmarks', node);
+  }
+
+  async putBookmarks(nodes: BookmarkNode[]): Promise<void> {
+    const db = await getDB();
+    const tx = db.transaction('bookmarks', 'readwrite');
+    for (const node of nodes) {
+      await tx.store.put(node);
+    }
+    await tx.done;
+  }
+
+  async deleteBookmark(id: string): Promise<void> {
+    const db = await getDB();
+    await db.delete('bookmarks', id);
+  }
+
+  async clearBookmarks(): Promise<void> {
+    const db = await getDB();
+    await db.clear('bookmarks');
+  }
+
+  async addTombstone(tombstone: Tombstone): Promise<void> {
+    const db = await getDB();
+    await db.put('tombstones', tombstone);
+  }
+
+  async getAllTombstones(): Promise<Tombstone[]> {
+    const db = await getDB();
+    return db.getAll('tombstones');
+  }
+
+  async removeTombstone(id: string): Promise<void> {
+    const db = await getDB();
+    await db.delete('tombstones', id);
+  }
+
+  async clearTombstones(): Promise<void> {
+    const db = await getDB();
+    await db.clear('tombstones');
+  }
+
+  async getSyncState(): Promise<SyncState> {
+    const db = await getDB();
+    const state = await db.get('syncMeta', 'syncState');
+    return (
+      state?.value || {
+        status: 'idle',
+        lastSyncAt: null,
+        lastSyncVersion: null,
+        lastError: null,
+        isDirty: false,
+      }
+    ) as SyncState;
+  }
+
+  async setSyncState(state: Partial<SyncState>): Promise<void> {
+    const db = await getDB();
+    const current = await this.getSyncState();
+    await db.put('syncMeta', {
+      key: 'syncState',
+      value: { ...current, ...state },
+    });
+  }
+
+  async getGistId(): Promise<string | null> {
+    const db = await getDB();
+    const record = await db.get('syncMeta', 'gistId');
+    return (record?.value as string) || null;
+  }
+
+  async setGistId(gistId: string): Promise<void> {
+    const db = await getDB();
+    await db.put('syncMeta', { key: 'gistId', value: gistId });
+  }
+
+  async getDeviceId(): Promise<string> {
+    const db = await getDB();
+    const record = await db.get('syncMeta', 'deviceId');
+    if (record?.value) return record.value as string;
+    const deviceId = `device-${crypto.randomUUID().slice(0, 8)}`;
+    await db.put('syncMeta', { key: 'deviceId', value: deviceId });
+    return deviceId;
+  }
+
+  async getLastChecksum(): Promise<string | null> {
+    const db = await getDB();
+    const record = await db.get('syncMeta', 'lastChecksum');
+    return (record?.value as string) || null;
+  }
+
+  async setLastChecksum(checksum: string): Promise<void> {
+    const db = await getDB();
+    await db.put('syncMeta', { key: 'lastChecksum', value: checksum });
+  }
+}
+
+export const localStore = new LocalStore();
