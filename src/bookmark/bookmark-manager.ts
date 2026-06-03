@@ -39,10 +39,10 @@ export class BookmarkManager {
   }
 
   async readBrowserTree(): Promise<BookmarkTree> {
-    const [barTree, otherTree] = await Promise.all([
+    const [treeResult] = await Promise.all([
       chrome.bookmarks.getTree(),
     ]);
-    const root = barTree[0];
+    const root = treeResult[0];
     const barChildren = root.children?.[0]?.children || [];
     const otherChildren = root.children?.[1]?.children || [];
     const mobileChildren = root.children?.[2]?.children || [];

@@ -1,4 +1,4 @@
-import { createSignal, onMount } from 'solid-js';
+import { createSignal, onMount, Show } from 'solid-js';
 import type { SyncState } from '@/types';
 
 export function SyncStatus() {

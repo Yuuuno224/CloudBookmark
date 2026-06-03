@@ -13,15 +13,15 @@ export default defineManifest({
   action: {
     default_popup: 'src/popup/index.html',
     default_icon: {
-      '16': 'src/assets/icon16.svg',
-      '48': 'src/assets/icon48.svg',
-      '128': 'src/assets/icon128.svg',
+      '16': 'icons/icon16.svg',
+      '48': 'icons/icon48.svg',
+      '128': 'icons/icon128.svg',
     },
   },
   icons: {
-    '16': 'src/assets/icon16.svg',
-    '48': 'src/assets/icon48.svg',
-    '128': 'src/assets/icon128.svg',
+    '16': 'icons/icon16.svg',
+    '48': 'icons/icon48.svg',
+    '128': 'icons/icon128.svg',
   },
   content_security_policy: {
     extension_pages:
