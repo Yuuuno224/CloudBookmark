@@ -15,9 +15,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - run: npm ci
+      - run: rm -f package-lock.json
+
+      - run: npm install --legacy-peer-deps
+
+      - name: Verify native bindings
+        run: |
+          test -d node_modules/rolldown || (echo "rolldown missing" && exit 1)
+          test -d node_modules/lightningcss || (echo "lightningcss missing" && exit 1)
+          echo "Native bindings OK"
 
       - run: npm run typecheck
 
