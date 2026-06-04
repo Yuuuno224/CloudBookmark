@@ -15,10 +15,14 @@
 
 ## 安装
 
+### 从 Release 下载（推荐）
+
+前往 [Releases](https://github.com/Yuuuno224/CloudBookmark/releases) 页面下载最新版本的 zip 包，解压后加载为浏览器扩展。
+
 ### 从源码构建
 
 ```bash
-git clone https://github.com/<your-username>/CloudBookmark.git
+git clone https://github.com/Yuuuno224/CloudBookmark.git
 cd CloudBookmark
 npm install
 npm run build
@@ -29,7 +33,7 @@ npm run build
 1. 打开 `chrome://extensions/`（Chrome）或 `edge://extensions/`（Edge）
 2. 开启右上角 **开发者模式**
 3. 点击 **加载已解压的扩展程序**
-4. 选择项目的 `dist` 目录
+4. 选择项目的 `dist` 目录（或解压后的 Release 目录）
 
 ## 使用
 
@@ -122,6 +126,16 @@ src/
 | 版本历史 | 天然 Git | 部分支持 | 需自行实现 | 有限 |
 | 实时性 | 手动触发 | 轮询 | WebSocket | 实时 |
 | 数据主权 | 用户控制 | 用户控制 | 用户控制 | 厂商控制 |
+
+## 免责声明
+
+本项目按"原样"提供，不作任何明示或暗示的保证，包括但不限于适销性和特定用途适用性的暗示保证。使用本项目的全部风险由用户自行承担。
+
+- 本项目依赖 [GitHub Gist API](https://docs.github.com/rest/gists) 进行数据存储，GitHub 可能随时变更 API 或速率限制策略，导致功能异常
+- GitHub Personal Access Token 存储于浏览器本地，虽经加密处理，但无法防御具有扩展完整访问权限的恶意软件或浏览器漏洞
+- 书签同步操作可能因网络异常、API 限制、数据冲突等因素导致数据丢失或损坏，**建议定期通过浏览器原生功能导出书签备份**
+- 本项目与 GitHub, Inc. 无任何关联，GitHub 是 GitHub, Inc. 的注册商标
+- 任何因使用本项目而产生的直接或间接损失，作者不承担任何责任
 
 ## 许可证
 
