@@ -2,15 +2,15 @@ import type {
   BookmarkTree,
   BookmarkNode,
   SyncMetadata,
-  Tombstone,
   DeletedRecord,
   ConflictEntry,
 } from '@/types';
-import { GistApiClient, GistApiError, RateLimitExceededError } from '@/api';
+import { GistApiClient } from '@/api';
 import { tokenManager } from '@/auth';
 import { localStore } from '@/storage';
 import { bookmarkManager } from '@/bookmark';
-import { nowISO, sha256, generateId } from '@/utils/helpers';
+import { nowISO, sha256 } from '@/utils/helpers';
+import { threeWayMerge, flattenTree, rebuildTree } from './merge';
 
 const TOMBSTONE_TTL_DAYS = 30;
 
@@ -57,61 +57,96 @@ export class SyncEngine {
       const remoteVersion = gist.history?.[0]?.version || null;
       const syncState = await localStore.getSyncState();
       const localVersion = syncState.lastSyncVersion;
-
-      const remoteBookmarks = this.parseGistFile<BookmarkTree>(
-        gist,
-        'bookmarks.json',
-      );
-      const remoteMetadata = this.parseGistFile<SyncMetadata>(
-        gist,
-        'metadata.json',
-      );
-      const remoteDeleted = this.parseGistFile<DeletedRecord>(
-        gist,
-        'deleted.json',
-      );
-
-      const hasRemoteChange = remoteVersion !== localVersion;
-      const hasLocalChange = syncState.isDirty;
       const isFirstSync = localVersion === null;
 
-      if (hasRemoteChange && hasLocalChange) {
-        const conflicts = await this.detectConflicts(remoteBookmarks);
-        if (conflicts.length > 0) {
-          await localStore.setSyncState({
-            status: 'conflict',
-            lastError: `${conflicts.length} conflicts detected`,
-          });
-          throw new SyncConflictError(conflicts);
-        }
+      const remoteTree = this.parseGistFile<BookmarkTree>(gist, 'bookmarks.json');
+      const remoteDeleted = this.parseGistFile<DeletedRecord>(gist, 'deleted.json');
+      const remoteNodes = flattenTree(remoteTree);
+
+      const localTree = await bookmarkManager.getBookmarkTree();
+      const localNodes = this.flattenLocalTree(localTree);
+
+      const baseNodes = (await localStore.getBaseState()) || [];
+
+      let mergedNodes: BookmarkNode[];
+      let conflicts: ConflictEntry[];
+
+      if (isFirstSync && baseNodes.length === 0) {
+        const result = threeWayMerge([], localNodes, remoteNodes);
+        mergedNodes = result.merged;
+        conflicts = result.conflicts;
+      } else {
+        const result = threeWayMerge(baseNodes, localNodes, remoteNodes);
+        mergedNodes = result.merged;
+        conflicts = result.conflicts;
       }
 
-      if (hasRemoteChange && !isFirstSync) {
-        await this.pull(remoteBookmarks, remoteDeleted);
+      if (conflicts.length > 0) {
+        await localStore.setSyncState({
+          status: 'conflict',
+          lastError: `${conflicts.length} conflicts detected (auto-resolved with LWW)`,
+        });
       }
 
-      if (hasLocalChange || !hasRemoteChange || isFirstSync) {
-        await this.push(api, gistId);
+      await this.applyTombstones(remoteDeleted);
+
+      const mergedTree = rebuildTree(mergedNodes);
+      mergedTree.checksum = await sha256(JSON.stringify(mergedTree.roots));
+
+      await bookmarkManager.applyMergedTree(mergedTree);
+
+      const finalTree = await bookmarkManager.getBookmarkTree();
+      const finalNodes = flattenTree(finalTree);
+      await localStore.putBookmarks(finalNodes);
+      await localStore.setBaseState(finalNodes);
+
+      const pushChecksum = await sha256(JSON.stringify(finalTree.roots));
+      const lastChecksum = await localStore.getLastChecksum();
+
+      if (pushChecksum !== lastChecksum) {
+        const deviceId = await localStore.getDeviceId();
+        const metadata: SyncMetadata = {
+          schemaVersion: 1,
+          devices: {
+            [deviceId]: {
+              name: 'Current Device',
+              lastSyncAt: nowISO(),
+              lastSyncVersion: remoteVersion || '',
+            },
+          },
+        };
+
+        const localTombstones = await localStore.getAllTombstones();
+        const deleted: DeletedRecord = { tombstones: localTombstones };
+
+        await api.updateSyncGist(
+          gistId,
+          JSON.stringify(finalTree, null, 2),
+          JSON.stringify(metadata, null, 2),
+          JSON.stringify(deleted, null, 2),
+        );
+
+        await localStore.setLastChecksum(pushChecksum);
       }
 
       const updatedGist = await api.getGist(gistId);
       const newVersion = updatedGist.history?.[0]?.version || null;
       await localStore.setSyncState({
-        status: 'idle',
+        status: conflicts.length > 0 ? 'conflict' : 'idle',
         lastSyncAt: nowISO(),
         lastSyncVersion: newVersion,
         isDirty: false,
       });
     } catch (err) {
       if (err instanceof SyncConflictError) throw err;
-      const message =
-        err instanceof Error ? err.message : 'Unknown sync error';
-      await localStore.setSyncState({
-        status: 'error',
-        lastError: message,
-      });
+      const message = err instanceof Error ? err.message : 'Unknown sync error';
+      await localStore.setSyncState({ status: 'error', lastError: message });
       throw err;
     }
+  }
+
+  private flattenLocalTree(tree: BookmarkTree): BookmarkNode[] {
+    return flattenTree(tree);
   }
 
   private parseGistFile<T>(gist: { files: Record<string, { content: string }> }, filename: string): T {
@@ -151,49 +186,11 @@ export class SyncEngine {
     );
 
     await localStore.setGistId(gist.id);
+    const localNodes = flattenTree(tree);
+    await localStore.setBaseState(localNodes);
     const checksum = await sha256(JSON.stringify(tree.roots));
     await localStore.setLastChecksum(checksum);
     return gist.id;
-  }
-
-  private async pull(
-    remoteTree: BookmarkTree,
-    remoteDeleted: DeletedRecord,
-  ): Promise<void> {
-    await this.applyTombstones(remoteDeleted);
-    await bookmarkManager.applyRemoteTree(remoteTree);
-  }
-
-  private async push(api: GistApiClient, gistId: string): Promise<void> {
-    const tree = await bookmarkManager.getBookmarkTree();
-    const checksum = await sha256(JSON.stringify(tree.roots));
-    const lastChecksum = await localStore.getLastChecksum();
-
-    if (checksum === lastChecksum) return;
-
-    const deviceId = await localStore.getDeviceId();
-    const metadata: SyncMetadata = {
-      schemaVersion: 1,
-      devices: {
-        [deviceId]: {
-          name: 'Current Device',
-          lastSyncAt: nowISO(),
-          lastSyncVersion: '',
-        },
-      },
-    };
-
-    const localTombstones = await localStore.getAllTombstones();
-    const deleted: DeletedRecord = { tombstones: localTombstones };
-
-    await api.updateSyncGist(
-      gistId,
-      JSON.stringify(tree, null, 2),
-      JSON.stringify(metadata, null, 2),
-      JSON.stringify(deleted, null, 2),
-    );
-
-    await localStore.setLastChecksum(checksum);
   }
 
   private async applyTombstones(remoteDeleted: DeletedRecord): Promise<void> {
@@ -217,83 +214,9 @@ export class SyncEngine {
     }
   }
 
-  private async detectConflicts(
-    remoteTree: BookmarkTree,
-  ): Promise<ConflictEntry[]> {
-    const conflicts: ConflictEntry[] = [];
-    const localTree = await bookmarkManager.getBookmarkTree();
-
-    const localMap = this.buildNodeMap(localTree);
-    const remoteMap = this.buildNodeMap(remoteTree);
-
-    for (const [id, localNode] of localMap) {
-      const remoteNode = remoteMap.get(id);
-      if (!remoteNode) continue;
-
-      if (
-        localNode.updatedAt !== remoteNode.updatedAt &&
-        localNode.title !== remoteNode.title &&
-        localNode.url !== remoteNode.url
-      ) {
-        conflicts.push({
-          id,
-          localValue: localNode,
-          remoteValue: remoteNode,
-          timestamp: nowISO(),
-        });
-      }
-    }
-
-    return conflicts;
-  }
-
-  private buildNodeMap(tree: BookmarkTree): Map<string, BookmarkNode> {
-    const map = new Map<string, BookmarkNode>();
-    const walk = (node: BookmarkNode) => {
-      map.set(node.id, node);
-      if (node.children) {
-        for (const child of node.children) {
-          walk(child);
-        }
-      }
-    };
-    walk(tree.roots.bookmark_bar);
-    walk(tree.roots.other);
-    walk(tree.roots.mobile);
-    return map;
-  }
-
   async resolveConflicts(
     resolutions: { id: string; resolution: 'local' | 'remote' | 'both' }[],
   ): Promise<void> {
-    const remoteTree: BookmarkTree | null = null;
-    if (!remoteTree) return;
-
-    const remoteMap = this.buildNodeMap(remoteTree);
-    const localTree = await bookmarkManager.getBookmarkTree();
-    const localMap = this.buildNodeMap(localTree);
-
-    for (const { id, resolution } of resolutions) {
-      const local = localMap.get(id);
-      const remote = remoteMap.get(id);
-
-      if (resolution === 'remote' && remote) {
-        // remote wins: apply remote to local
-      } else if (resolution === 'local' && local) {
-        // local wins: will be pushed on next sync
-      } else if (resolution === 'both' && local && remote) {
-        // keep both: create a copy of remote with new id
-        const copy: BookmarkNode = {
-          ...remote,
-          id: generateId(),
-          title: `${remote.title} (copy)`,
-          createdAt: nowISO(),
-          updatedAt: nowISO(),
-        };
-        await localStore.putBookmark(copy);
-      }
-    }
-
     await localStore.setSyncState({ status: 'idle', isDirty: true });
     await this.sync();
   }

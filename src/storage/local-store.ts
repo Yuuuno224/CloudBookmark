@@ -144,6 +144,17 @@ export class LocalStore {
     const db = await getDB();
     await db.put('syncMeta', { key: 'lastChecksum', value: checksum });
   }
+
+  async getBaseState(): Promise<BookmarkNode[] | null> {
+    const db = await getDB();
+    const record = await db.get('syncMeta', 'baseState');
+    return (record?.value as BookmarkNode[]) || null;
+  }
+
+  async setBaseState(nodes: BookmarkNode[]): Promise<void> {
+    const db = await getDB();
+    await db.put('syncMeta', { key: 'baseState', value: nodes });
+  }
 }
 
 export const localStore = new LocalStore();
