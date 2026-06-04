@@ -116,12 +116,13 @@ export class BookmarkManager {
     const allLocal = await localStore.getAllBookmarks();
     const localMap = new Map(allLocal.map((n) => [n.id, n]));
     const remoteNodes = this.flattenTree(tree);
+    const remoteMap = new Map(remoteNodes.map((n) => [n.id, n]));
 
     const toRemove: string[] = [];
     const toAdd: BookmarkNode[] = [];
 
     for (const local of allLocal) {
-      if (!remoteNodes.find((r) => r.id === local.id)) {
+      if (!remoteMap.has(local.id)) {
         toRemove.push(local.id);
       }
     }
@@ -146,17 +147,42 @@ export class BookmarkManager {
       }
     }
 
-    for (const node of toAdd) {
+    const foldersFirst = toAdd.sort((a, b) => {
+      if (a.type === 'folder' && b.type !== 'folder') return -1;
+      if (a.type !== 'folder' && b.type === 'folder') return 1;
+      return 0;
+    });
+
+    const idMapping = new Map<string, string>();
+
+    for (const node of foldersFirst) {
       await localStore.putBookmark(node);
-      if (node.type === 'bookmark' && node.url && node.parentId) {
+
+      const resolvedParentId = node.parentId
+        ? idMapping.get(node.parentId) || node.parentId
+        : undefined;
+
+      if (node.type === 'folder') {
+        try {
+          const result = await chrome.bookmarks.create({
+            parentId: resolvedParentId || '1',
+            title: node.title,
+          });
+          if (result.id !== node.id) {
+            idMapping.set(node.id, result.id);
+          }
+        } catch {
+          // parent may not exist yet, skip
+        }
+      } else if (node.type === 'bookmark' && node.url) {
         try {
           await chrome.bookmarks.create({
-            parentId: node.parentId,
+            parentId: resolvedParentId || '1',
             title: node.title,
             url: node.url,
           });
         } catch {
-          // parent may not exist yet
+          // parent may not exist yet, skip
         }
       }
     }

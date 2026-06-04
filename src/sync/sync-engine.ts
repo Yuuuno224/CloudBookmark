@@ -73,6 +73,7 @@ export class SyncEngine {
 
       const hasRemoteChange = remoteVersion !== localVersion;
       const hasLocalChange = syncState.isDirty;
+      const isFirstSync = localVersion === null;
 
       if (hasRemoteChange && hasLocalChange) {
         const conflicts = await this.detectConflicts(remoteBookmarks);
@@ -85,11 +86,11 @@ export class SyncEngine {
         }
       }
 
-      if (hasRemoteChange) {
+      if (hasRemoteChange && !isFirstSync) {
         await this.pull(remoteBookmarks, remoteDeleted);
       }
 
-      if (hasLocalChange || !hasRemoteChange) {
+      if (hasLocalChange || !hasRemoteChange || isFirstSync) {
         await this.push(api, gistId);
       }
 
@@ -150,6 +151,8 @@ export class SyncEngine {
     );
 
     await localStore.setGistId(gist.id);
+    const checksum = await sha256(JSON.stringify(tree.roots));
+    await localStore.setLastChecksum(checksum);
     return gist.id;
   }
 
