@@ -27,7 +27,7 @@ export class SyncEngine {
 
   private async getApiClient(): Promise<GistApiClient> {
     const token = await tokenManager.getToken();
-    if (!token) throw new Error('No token configured');
+    if (!token) throw new Error('未配置 Token');
     if (!this.apiClient) {
       this.apiClient = new GistApiClient(token);
     } else {
@@ -64,7 +64,7 @@ export class SyncEngine {
       const remoteNodes = flattenTree(remoteTree);
 
       const localTree = await bookmarkManager.getBookmarkTree();
-      const localNodes = this.flattenLocalTree(localTree);
+      const localNodes = flattenTree(localTree);
 
       const baseNodes = (await localStore.getBaseState()) || [];
 
@@ -84,7 +84,7 @@ export class SyncEngine {
       if (conflicts.length > 0) {
         await localStore.setSyncState({
           status: 'conflict',
-          lastError: `${conflicts.length} conflicts detected (auto-resolved with LWW)`,
+          lastError: `${conflicts.length} 个冲突（已按时间戳自动解决）`,
         });
       }
 
@@ -139,19 +139,15 @@ export class SyncEngine {
       });
     } catch (err) {
       if (err instanceof SyncConflictError) throw err;
-      const message = err instanceof Error ? err.message : 'Unknown sync error';
+      const message = err instanceof Error ? err.message : '未知同步错误';
       await localStore.setSyncState({ status: 'error', lastError: message });
       throw err;
     }
   }
 
-  private flattenLocalTree(tree: BookmarkTree): BookmarkNode[] {
-    return flattenTree(tree);
-  }
-
   private parseGistFile<T>(gist: { files: Record<string, { content: string }> }, filename: string): T {
     const file = gist.files[filename];
-    if (!file?.content) throw new Error(`Gist file ${filename} not found`);
+    if (!file?.content) throw new Error(`Gist 文件 ${filename} 未找到`);
     return JSON.parse(file.content) as T;
   }
 
@@ -201,23 +197,22 @@ export class SyncEngine {
       const deletedAt = new Date(tombstone.deletedAt).getTime();
       if (now - deletedAt > ttl) continue;
 
+      const browserId = bookmarkManager.toBrowserId(tombstone.id);
       try {
-        await chrome.bookmarks.remove(tombstone.id);
+        await chrome.bookmarks.remove(browserId);
       } catch {
         try {
-          await chrome.bookmarks.removeTree(tombstone.id);
-        } catch {
-          // already removed
-        }
+          await chrome.bookmarks.removeTree(browserId);
+        } catch { /* already removed */ }
       }
       await localStore.addTombstone(tombstone);
     }
   }
 
   async resolveConflicts(
-    resolutions: { id: string; resolution: 'local' | 'remote' | 'both' }[],
+    _resolutions: { id: string; resolution: 'local' | 'remote' | 'both' }[],
   ): Promise<void> {
-    await localStore.setSyncState({ status: 'idle', isDirty: true });
+    await localStore.setSyncState({ status: 'idle', isDirty: false });
     await this.sync();
   }
 

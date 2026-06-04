@@ -1,27 +1,23 @@
 import type { BookmarkNode, BookmarkTree, ConflictEntry } from '@/types';
-import { nowISO, generateId } from '@/utils/helpers';
+import { nowISO } from '@/utils/helpers';
 
 export interface NodeMap {
   byId: Map<string, BookmarkNode>;
-  byUrl: Map<string, BookmarkNode[]>;
+  byUrl: Map<string, BookmarkNode>;
 }
 
 export interface MergeResult {
   merged: BookmarkNode[];
   conflicts: ConflictEntry[];
-  localOnly: BookmarkNode[];
-  remoteOnly: BookmarkNode[];
 }
 
 export function buildNodeMap(nodes: BookmarkNode[]): NodeMap {
   const byId = new Map<string, BookmarkNode>();
-  const byUrl = new Map<string, BookmarkNode[]>();
+  const byUrl = new Map<string, BookmarkNode>();
   for (const node of nodes) {
     byId.set(node.id, node);
-    if (node.url) {
-      const list = byUrl.get(node.url) || [];
-      list.push(node);
-      byUrl.set(node.url, list);
+    if (node.url && !byUrl.has(node.url)) {
+      byUrl.set(node.url, node);
     }
   }
   return { byId, byUrl };
@@ -44,11 +40,6 @@ export function flattenTree(tree: BookmarkTree): BookmarkNode[] {
   return nodes;
 }
 
-function nodeKey(node: BookmarkNode): string {
-  if (node.url) return `url:${node.url}`;
-  return `id:${node.id}`;
-}
-
 function isSameContent(a: BookmarkNode, b: BookmarkNode): boolean {
   return (
     a.title === b.title &&
@@ -68,9 +59,17 @@ export function threeWayMerge(
   const remote = buildNodeMap(remoteNodes);
 
   const mergedMap = new Map<string, BookmarkNode>();
+  const mergedUrls = new Set<string>();
   const conflicts: ConflictEntry[] = [];
-  const localOnly: BookmarkNode[] = [];
-  const remoteOnly: BookmarkNode[] = [];
+
+  function addMerged(node: BookmarkNode): boolean {
+    if (node.url) {
+      if (mergedUrls.has(node.url)) return false;
+      mergedUrls.add(node.url);
+    }
+    mergedMap.set(node.id, node);
+    return true;
+  }
 
   const allIds = new Set([
     ...base.byId.keys(),
@@ -89,13 +88,13 @@ export function threeWayMerge(
 
     if (inBase && inLocal && inRemote) {
       if (isSameContent(localNode!, baseNode!) && isSameContent(remoteNode!, baseNode!)) {
-        mergedMap.set(id, localNode!);
+        addMerged(localNode!);
       } else if (isSameContent(localNode!, baseNode!)) {
-        mergedMap.set(id, remoteNode!);
+        addMerged(remoteNode!);
       } else if (isSameContent(remoteNode!, baseNode!)) {
-        mergedMap.set(id, localNode!);
+        addMerged(localNode!);
       } else if (isSameContent(localNode!, remoteNode!)) {
-        mergedMap.set(id, localNode!);
+        addMerged(localNode!);
       } else {
         const lTime = new Date(localNode!.updatedAt).getTime();
         const rTime = new Date(remoteNode!.updatedAt).getTime();
@@ -105,109 +104,76 @@ export function threeWayMerge(
           remoteValue: remoteNode!,
           timestamp: nowISO(),
         });
-        mergedMap.set(id, lTime >= rTime ? localNode! : remoteNode!);
+        addMerged(lTime >= rTime ? localNode! : remoteNode!);
       }
     } else if (inBase && inLocal && !inRemote) {
-      const baseUrl = baseNode!.url;
-      const remoteHasSameUrl = baseUrl && remote.byUrl.has(baseUrl);
-      if (remoteHasSameUrl) {
-        const remoteMatches = remote.byUrl.get(baseUrl!)!;
-        const remoteMatch = remoteMatches.find(
-          (r) => r.title === baseNode!.title && !base.byId.has(r.id),
-        );
-        if (remoteMatch) {
-          mergedMap.set(id, { ...localNode!, url: remoteMatch.url, title: remoteMatch.title, updatedAt: remoteMatch.updatedAt });
-        } else {
-          localOnly.push(localNode!);
-          mergedMap.set(id, localNode!);
-        }
+      if (localNode!.url && remote.byUrl.has(localNode!.url)) {
+        // remote has same URL under different ID — local deletion + remote rename
+        const remoteMatch = remote.byUrl.get(localNode!.url!)!;
+        addMerged(remoteMatch);
       } else {
-        localOnly.push(localNode!);
-        mergedMap.set(id, localNode!);
+        addMerged(localNode!);
       }
     } else if (inBase && !inLocal && inRemote) {
-      const baseUrl = baseNode!.url;
-      const localHasSameUrl = baseUrl && local.byUrl.has(baseUrl);
-      if (localHasSameUrl) {
-        remoteOnly.push(remoteNode!);
-        mergedMap.set(id, remoteNode!);
+      if (remoteNode!.url && local.byUrl.has(remoteNode!.url)) {
+        // local has same URL under different ID — remote deletion + local rename
+        const localMatch = local.byUrl.get(remoteNode!.url!)!;
+        addMerged(localMatch);
       } else {
-        remoteOnly.push(remoteNode!);
-        mergedMap.set(id, remoteNode!);
+        addMerged(remoteNode!);
       }
     } else if (inBase && !inLocal && !inRemote) {
-      // both deleted - skip
+      // both deleted — skip
     } else if (!inBase && inLocal && inRemote) {
-      if (isSameContent(localNode!, remoteNode!)) {
-        mergedMap.set(id, localNode!);
-      } else if (localNode!.url && remoteNode!.url && localNode!.url === remoteNode!.url) {
+      if (localNode!.url && remoteNode!.url && localNode!.url === remoteNode!.url) {
         const lTime = new Date(localNode!.updatedAt).getTime();
         const rTime = new Date(remoteNode!.updatedAt).getTime();
-        mergedMap.set(id, lTime >= rTime ? localNode! : remoteNode!);
+        addMerged(lTime >= rTime ? localNode! : remoteNode!);
+      } else if (isSameContent(localNode!, remoteNode!)) {
+        addMerged(localNode!);
       } else {
-        mergedMap.set(id, localNode!);
-        const altId = `${id}-remote`;
-        mergedMap.set(altId, { ...remoteNode!, id: altId });
-        conflicts.push({
-          id,
-          localValue: localNode!,
-          remoteValue: remoteNode!,
-          timestamp: nowISO(),
-        });
+        addMerged(localNode!);
+        const altNode: BookmarkNode = { ...remoteNode!, id: `${id}-remote` };
+        if (!addMerged(altNode)) {
+          conflicts.push({
+            id,
+            localValue: localNode!,
+            remoteValue: remoteNode!,
+            timestamp: nowISO(),
+          });
+        }
       }
     } else if (!inBase && inLocal && !inRemote) {
-      mergedMap.set(id, localNode!);
-      localOnly.push(localNode!);
+      addMerged(localNode!);
     } else if (!inBase && !inLocal && inRemote) {
-      mergedMap.set(id, remoteNode!);
-      remoteOnly.push(remoteNode!);
+      addMerged(remoteNode!);
     }
   }
 
   for (const remoteNode of remoteNodes) {
     if (mergedMap.has(remoteNode.id)) continue;
     if (base.byId.has(remoteNode.id)) continue;
-
-    if (remoteNode.url) {
-      const localMatches = local.byUrl.get(remoteNode.url);
-      if (localMatches) {
-        const alreadyMerged = [...mergedMap.values()].some(
-          (m) => m.url === remoteNode.url && m.title === remoteNode.title,
-        );
-        if (alreadyMerged) continue;
-      }
-    }
-
-    mergedMap.set(remoteNode.id, remoteNode);
-    remoteOnly.push(remoteNode);
+    addMerged(remoteNode);
   }
 
   for (const localNode of localNodes) {
     if (mergedMap.has(localNode.id)) continue;
     if (base.byId.has(localNode.id)) continue;
-    mergedMap.set(localNode.id, localNode);
-    localOnly.push(localNode);
+    addMerged(localNode);
   }
 
   const merged = Array.from(mergedMap.values());
-  return { merged, conflicts, localOnly, remoteOnly };
+  return { merged, conflicts };
 }
 
 export function rebuildTree(mergedNodes: BookmarkNode[]): BookmarkTree {
   const now = nowISO();
-  const nodeMap = new Map(mergedNodes.map((n) => [n.id, n]));
-
   const rootIds = ['bookmark_bar', 'other', 'mobile'];
+
   const defaultRoots: Record<string, BookmarkNode> = {
     bookmark_bar: { id: 'bookmark_bar', title: '书签栏', type: 'folder', children: [], createdAt: now, updatedAt: now },
     other: { id: 'other', title: '其他书签', type: 'folder', children: [], createdAt: now, updatedAt: now },
     mobile: { id: 'mobile', title: '移动设备书签', type: 'folder', children: [], createdAt: now, updatedAt: now },
-  };
-
-  const roots: BookmarkTree['roots'] = {
-    bookmark_bar: { ...defaultRoots.bookmark_bar },
-    other: { ...defaultRoots.other },
-    mobile: { ...defaultRoots.mobile },
   };
 
   const rootChildren: Record<string, BookmarkNode[]> = {
@@ -234,9 +200,14 @@ export function rebuildTree(mergedNodes: BookmarkNode[]): BookmarkTree {
     return { ...node, children: kids.map(attachChildren) };
   }
 
-  roots.bookmark_bar = { ...defaultRoots.bookmark_bar, children: rootChildren.bookmark_bar.map(attachChildren) };
-  roots.other = { ...defaultRoots.other, children: rootChildren.other.map(attachChildren) };
-  roots.mobile = { ...defaultRoots.mobile, children: rootChildren.mobile.map(attachChildren) };
-
-  return { version: 3, updatedAt: now, checksum: '', roots };
+  return {
+    version: 3,
+    updatedAt: now,
+    checksum: '',
+    roots: {
+      bookmark_bar: { ...defaultRoots.bookmark_bar, children: rootChildren.bookmark_bar.map(attachChildren) },
+      other: { ...defaultRoots.other, children: rootChildren.other.map(attachChildren) },
+      mobile: { ...defaultRoots.mobile, children: rootChildren.mobile.map(attachChildren) },
+    },
+  };
 }

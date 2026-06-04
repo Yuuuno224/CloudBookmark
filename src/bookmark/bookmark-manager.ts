@@ -1,35 +1,48 @@
 import type { BookmarkNode, BookmarkTree } from '@/types';
 import { localStore } from '@/storage';
-import { nowISO, sha256, debounce } from '@/utils/helpers';
+import { nowISO, sha256 } from '@/utils/helpers';
 
-type DirtyCallback = () => void;
+export type BrowserType = 'chrome' | 'edge' | 'unknown';
+
+export function detectBrowser(): BrowserType {
+  const ua = navigator.userAgent;
+  if (ua.includes('Edg/')) return 'edge';
+  if (ua.includes('Chrome/')) return 'chrome';
+  return 'unknown';
+}
+
+const ROOT_ID_MAP: Record<string, string> = {
+  bookmark_bar: 'bookmark_bar',
+  other: 'other',
+  mobile: 'mobile',
+};
 
 export class BookmarkManager {
-  private dirtyCallback: DirtyCallback | null = null;
   private initialized = false;
   private applyingRemote = false;
+  private browserType: BrowserType = 'unknown';
 
-  onDirty(callback: DirtyCallback): void {
-    this.dirtyCallback = callback;
+  private browserToCanonicalId = new Map<string, string>();
+  private canonicalToBrowserId = new Map<string, string>();
+
+  private mapId(browserId: string, canonicalId: string): void {
+    this.browserToCanonicalId.set(browserId, canonicalId);
+    this.canonicalToBrowserId.set(canonicalId, browserId);
   }
 
-  private markDirty(): void {
-    if (this.applyingRemote) return;
-    localStore.setSyncState({ isDirty: true });
-    this.dirtyCallback?.();
+  toCanonicalId(browserId: string): string {
+    return this.browserToCanonicalId.get(browserId) || browserId;
   }
 
-  private markDirtyDebounced = debounce(() => this.markDirty(), 500);
+  toBrowserId(canonicalId: string): string {
+    return this.canonicalToBrowserId.get(canonicalId) || canonicalId;
+  }
 
   async init(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
-
-    chrome.bookmarks.onCreated.addListener(() => this.markDirtyDebounced());
-    chrome.bookmarks.onRemoved.addListener(() => this.markDirtyDebounced());
-    chrome.bookmarks.onChanged.addListener(() => this.markDirtyDebounced());
-    chrome.bookmarks.onMoved.addListener(() => this.markDirtyDebounced());
-
+    this.browserType = detectBrowser();
+    console.info(`[CloudBookmark] Browser detected: ${this.browserType}`);
     await this.syncFromBrowser();
   }
 
@@ -40,29 +53,11 @@ export class BookmarkManager {
     await localStore.putBookmarks(allNodes);
   }
 
-  private browserToCanonicalId = new Map<string, string>();
-  private canonicalToBrowserId = new Map<string, string>();
-
-  private mapId(browserId: string, canonicalId: string): void {
-    this.browserToCanonicalId.set(browserId, canonicalId);
-    this.canonicalToBrowserId.set(canonicalId, browserId);
-  }
-
-  private toCanonicalId(browserId: string): string {
-    return this.browserToCanonicalId.get(browserId) || browserId;
-  }
-
-  private toBrowserId(canonicalId: string): string {
-    return this.canonicalToBrowserId.get(canonicalId) || canonicalId;
-  }
-
   async readBrowserTree(): Promise<BookmarkTree> {
     this.browserToCanonicalId.clear();
     this.canonicalToBrowserId.clear();
 
-    const [treeResult] = await Promise.all([
-      chrome.bookmarks.getTree(),
-    ]);
+    const [treeResult] = await Promise.all([chrome.bookmarks.getTree()]);
     const root = treeResult[0];
 
     const barNode = root.children?.[0];
@@ -75,13 +70,13 @@ export class BookmarkManager {
 
     const bookmarkBar = barNode
       ? this.convertNode(barNode, 'bookmark_bar')
-      : { id: 'bookmark_bar', title: '书签栏', type: 'folder' as const, children: [] as BookmarkNode[], createdAt: nowISO(), updatedAt: nowISO() };
+      : this.defaultRoot('bookmark_bar', '书签栏');
     const other = otherNode
       ? this.convertNode(otherNode, 'other')
-      : { id: 'other', title: '其他书签', type: 'folder' as const, children: [] as BookmarkNode[], createdAt: nowISO(), updatedAt: nowISO() };
+      : this.defaultRoot('other', '其他书签');
     const mobile = mobileNode
       ? this.convertNode(mobileNode, 'mobile')
-      : { id: 'mobile', title: '移动设备书签', type: 'folder' as const, children: [] as BookmarkNode[], createdAt: nowISO(), updatedAt: nowISO() };
+      : this.defaultRoot('mobile', '移动设备书签');
 
     bookmarkBar.children = (barNode?.children || []).map((c) => this.convertNode(c));
     other.children = (otherNode?.children || []).map((c) => this.convertNode(c));
@@ -95,6 +90,11 @@ export class BookmarkManager {
     };
     tree.checksum = await sha256(JSON.stringify(tree.roots));
     return tree;
+  }
+
+  private defaultRoot(id: string, title: string): BookmarkNode {
+    const now = nowISO();
+    return { id, title, type: 'folder', children: [], createdAt: now, updatedAt: now };
   }
 
   private convertNode(
@@ -125,7 +125,7 @@ export class BookmarkManager {
     };
   }
 
-  private flattenTree(tree: BookmarkTree): BookmarkNode[] {
+  flattenTree(tree: BookmarkTree): BookmarkNode[] {
     const nodes: BookmarkNode[] = [];
     const walk = (node: BookmarkNode) => {
       const { children, ...flat } = node;
@@ -142,85 +142,6 @@ export class BookmarkManager {
     return nodes;
   }
 
-  async applyRemoteTree(tree: BookmarkTree): Promise<void> {
-    this.applyingRemote = true;
-    try {
-      const allLocal = await localStore.getAllBookmarks();
-      const localMap = new Map(allLocal.map((n) => [n.id, n]));
-      const remoteNodes = this.flattenTree(tree);
-      const remoteMap = new Map(remoteNodes.map((n) => [n.id, n]));
-
-      const toRemove: string[] = [];
-      const toAdd: BookmarkNode[] = [];
-
-      for (const local of allLocal) {
-        if (!remoteMap.has(local.id)) {
-          toRemove.push(local.id);
-        }
-      }
-
-      for (const remote of remoteNodes) {
-        const local = localMap.get(remote.id);
-        if (!local || local.updatedAt < remote.updatedAt) {
-          toAdd.push(remote);
-        }
-      }
-
-      for (const canonicalId of toRemove) {
-        await localStore.deleteBookmark(canonicalId);
-        const browserId = this.toBrowserId(canonicalId);
-        try {
-          await chrome.bookmarks.remove(browserId);
-        } catch {
-          try {
-            await chrome.bookmarks.removeTree(browserId);
-          } catch {
-            // already removed
-          }
-        }
-      }
-
-      const foldersFirst = toAdd.sort((a, b) => {
-        if (a.type === 'folder' && b.type !== 'folder') return -1;
-        if (a.type !== 'folder' && b.type === 'folder') return 1;
-        return 0;
-      });
-
-      for (const node of foldersFirst) {
-        await localStore.putBookmark(node);
-
-        const browserParentId = node.parentId
-          ? this.toBrowserId(node.parentId)
-          : this.toBrowserId('bookmark_bar');
-
-        if (node.type === 'folder' && !['bookmark_bar', 'other', 'mobile'].includes(node.id)) {
-          try {
-            const result = await chrome.bookmarks.create({
-              parentId: browserParentId,
-              title: node.title,
-            });
-            this.mapId(result.id, node.id);
-          } catch {
-            // parent may not exist yet, skip
-          }
-        } else if (node.type === 'bookmark' && node.url) {
-          try {
-            const result = await chrome.bookmarks.create({
-              parentId: browserParentId,
-              title: node.title,
-              url: node.url,
-            });
-            this.mapId(result.id, node.id);
-          } catch {
-            // parent may not exist yet, skip
-          }
-        }
-      }
-    } finally {
-      this.applyingRemote = false;
-    }
-  }
-
   async applyMergedTree(tree: BookmarkTree): Promise<void> {
     this.applyingRemote = true;
     try {
@@ -230,11 +151,15 @@ export class BookmarkManager {
       const existingTree = await this.readBrowserTree();
       const existingNodes = this.flattenTree(existingTree);
       const existingById = new Map(existingNodes.map((n) => [n.id, n]));
+      const existingByUrl = new Map<string, BookmarkNode>();
+      for (const n of existingNodes) {
+        if (n.url) existingByUrl.set(n.url, n);
+      }
 
       const toRemove: string[] = [];
       for (const existing of existingNodes) {
         if (!mergedById.has(existing.id)) {
-          if (!['bookmark_bar', 'other', 'mobile'].includes(existing.id) && existing.parentId) {
+          if (!Object.values(ROOT_ID_MAP).includes(existing.id) && existing.parentId) {
             toRemove.push(existing.id);
           }
         }
@@ -247,19 +172,14 @@ export class BookmarkManager {
         } catch {
           try {
             await chrome.bookmarks.removeTree(browserId);
-          } catch {
-            // already removed
-          }
+          } catch { /* already removed */ }
         }
       }
 
+      const rootIds = Object.values(ROOT_ID_MAP);
       const folders = mergedNodes
-        .filter((n) => n.type === 'folder' && !['bookmark_bar', 'other', 'mobile'].includes(n.id))
-        .sort((a, b) => {
-          const aDepth = a.parentId ? 0 : -1;
-          const bDepth = b.parentId ? 0 : -1;
-          return aDepth - bDepth;
-        });
+        .filter((n) => n.type === 'folder' && !rootIds.includes(n.id))
+        .sort((a, b) => (a.parentId ? 0 : -1) - (b.parentId ? 0 : -1));
       const bookmarks = mergedNodes.filter((n) => n.type === 'bookmark');
 
       for (const folder of folders) {
@@ -283,13 +203,32 @@ export class BookmarkManager {
               title: folder.title,
             });
             this.mapId(result.id, folder.id);
-          } catch {
-            // parent may not exist yet
-          }
+          } catch { /* parent may not exist yet */ }
         }
       }
 
       for (const bm of bookmarks) {
+        if (bm.url && existingByUrl.has(bm.url)) {
+          const existingDupe = existingByUrl.get(bm.url)!;
+          if (existingById.has(bm.id) && existingDupe.id === bm.id) {
+            const browserId = this.toBrowserId(bm.id);
+            const existing = existingById.get(bm.id)!;
+            const updates: { title?: string; url?: string } = {};
+            if (existing.title !== bm.title) updates.title = bm.title;
+            if (existing.url !== bm.url && bm.url) updates.url = bm.url;
+            if (updates.title || updates.url) {
+              try { await chrome.bookmarks.update(browserId, updates); } catch { /* skip */ }
+            }
+            if (existing.parentId !== bm.parentId) {
+              const browserParentId = bm.parentId
+                ? this.toBrowserId(bm.parentId)
+                : this.toBrowserId('bookmark_bar');
+              try { await chrome.bookmarks.move(browserId, { parentId: browserParentId }); } catch { /* skip */ }
+            }
+          }
+          continue;
+        }
+
         const browserParentId = bm.parentId
           ? this.toBrowserId(bm.parentId)
           : this.toBrowserId('bookmark_bar');
@@ -314,9 +253,7 @@ export class BookmarkManager {
               url: bm.url,
             });
             this.mapId(result.id, bm.id);
-          } catch {
-            // parent may not exist yet
-          }
+          } catch { /* parent may not exist yet */ }
         }
       }
     } finally {
