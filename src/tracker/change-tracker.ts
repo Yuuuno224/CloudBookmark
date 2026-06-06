@@ -139,7 +139,7 @@ export class ChangeTracker {
       topFolders: [],
     };
 
-    const folderCount = new Map<string, { title: string; count: number }>();
+    const folderCount = new Map<string, { parentId: string; title: string; count: number }>();
 
     for (const r of records) {
       switch (r.action) {
@@ -160,7 +160,7 @@ export class ChangeTracker {
         if (existing) {
           existing.count++;
         } else {
-          folderCount.set(r.parentId, { title: r.parentId, count: 1 });
+          folderCount.set(r.parentId, { parentId: r.parentId, title: r.parentId, count: 1 });
         }
       }
     }
