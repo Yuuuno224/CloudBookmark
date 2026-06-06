@@ -60,3 +60,28 @@ export interface SyncState {
   lastError: string | null;
   isDirty: boolean;
 }
+
+export type ChangeAction = 'create' | 'remove' | 'update' | 'move';
+
+export interface ChangeRecord {
+  id: string;
+  action: ChangeAction;
+  bookmarkId: string;
+  bookmarkTitle: string;
+  bookmarkUrl?: string;
+  parentId?: string;
+  oldParentId?: string;
+  timestamp: string;
+  details?: string;
+}
+
+export interface ChangeStats {
+  total: number;
+  creates: number;
+  removes: number;
+  updates: number;
+  moves: number;
+  byDate: Record<string, number>;
+  byHour: number[];
+  topFolders: { parentId: string; title: string; count: number }[];
+}

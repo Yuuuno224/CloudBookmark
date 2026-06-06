@@ -2,6 +2,7 @@ import { bookmarkManager } from '@/bookmark';
 import { syncEngine } from '@/sync';
 import { tokenManager } from '@/auth';
 import { localStore } from '@/storage';
+import { changeTracker } from '@/tracker';
 
 async function init(): Promise<void> {
   const hasToken = await tokenManager.hasToken();
@@ -10,6 +11,7 @@ async function init(): Promise<void> {
     return;
   }
   await bookmarkManager.init();
+  await changeTracker.init();
   console.info('[CloudBookmark] Initialized, manual sync ready');
 }
 
@@ -26,7 +28,12 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SYNC_NOW') {
-    syncEngine.sync().then(() => sendResponse({ ok: true })).catch((err) => {
+    changeTracker.suppress();
+    syncEngine.sync().then(() => {
+      changeTracker.resume();
+      sendResponse({ ok: true });
+    }).catch((err) => {
+      changeTracker.resume();
       sendResponse({ ok: false, error: err.message });
     });
     return true;
@@ -44,6 +51,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((err) => {
         sendResponse({ ok: false, error: err.message });
       });
+    return true;
+  }
+
+  if (message.type === 'GET_CHANGE_LOG') {
+    changeTracker
+      .getRecentChanges(message.limit || 100)
+      .then((records) => sendResponse({ records }));
+    return true;
+  }
+
+  if (message.type === 'GET_CHANGE_STATS') {
+    changeTracker
+      .getStats(message.days || 30)
+      .then((stats) => sendResponse({ stats }));
+    return true;
+  }
+
+  if (message.type === 'CLEAR_CHANGE_LOG') {
+    changeTracker.clearAll().then(() => sendResponse({ ok: true }));
     return true;
   }
 

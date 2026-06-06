@@ -1,13 +1,14 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import type { BookmarkNode, SyncState, Tombstone } from '@/types';
+import type { BookmarkNode, SyncState, Tombstone, ChangeRecord } from '@/types';
 
 const DB_NAME = 'cloudbookmark';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 interface CloudBookmarkDB {
   bookmarks: BookmarkNode & { parentId?: string };
   tombstones: Tombstone;
   syncMeta: { key: string; value: unknown };
+  changeRecords: ChangeRecord;
 }
 
 let dbInstance: IDBPDatabase<CloudBookmarkDB> | null = null;
@@ -15,7 +16,7 @@ let dbInstance: IDBPDatabase<CloudBookmarkDB> | null = null;
 async function getDB(): Promise<IDBPDatabase<CloudBookmarkDB>> {
   if (dbInstance) return dbInstance;
   dbInstance = await openDB<CloudBookmarkDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains('bookmarks')) {
         const store = db.createObjectStore('bookmarks', { keyPath: 'id' });
         store.createIndex('parentId', 'parentId');
@@ -25,6 +26,12 @@ async function getDB(): Promise<IDBPDatabase<CloudBookmarkDB>> {
       }
       if (!db.objectStoreNames.contains('syncMeta')) {
         db.createObjectStore('syncMeta', { keyPath: 'key' });
+      }
+      if (oldVersion < 2 && !db.objectStoreNames.contains('changeRecords')) {
+        const store = db.createObjectStore('changeRecords', { keyPath: 'id' });
+        store.createIndex('timestamp', 'timestamp');
+        store.createIndex('action', 'action');
+        store.createIndex('bookmarkId', 'bookmarkId');
       }
     },
   });
@@ -154,6 +161,45 @@ export class LocalStore {
   async setBaseState(nodes: BookmarkNode[]): Promise<void> {
     const db = await getDB();
     await db.put('syncMeta', { key: 'baseState', value: nodes });
+  }
+
+  async addChangeRecord(record: ChangeRecord): Promise<void> {
+    const db = await getDB();
+    await db.put('changeRecords', record);
+  }
+
+  async getChangeRecordCount(): Promise<number> {
+    const db = await getDB();
+    return db.count('changeRecords');
+  }
+
+  async getRecentChangeRecords(limit = 50): Promise<ChangeRecord[]> {
+    const db = await getDB();
+    const all = await db.getAllFromIndex('changeRecords', 'timestamp');
+    return all.reverse().slice(0, limit);
+  }
+
+  async getChangeRecordsSince(since: string): Promise<ChangeRecord[]> {
+    const db = await getDB();
+    const all = await db.getAllFromIndex('changeRecords', 'timestamp');
+    return all.filter((r) => r.timestamp >= since);
+  }
+
+  async trimChangeRecords(keepCount: number): Promise<void> {
+    const db = await getDB();
+    const all = await db.getAllFromIndex('changeRecords', 'timestamp');
+    if (all.length <= keepCount) return;
+    const toRemove = all.slice(0, all.length - keepCount);
+    const tx = db.transaction('changeRecords', 'readwrite');
+    for (const r of toRemove) {
+      await tx.store.delete(r.id);
+    }
+    await tx.done;
+  }
+
+  async clearChangeRecords(): Promise<void> {
+    const db = await getDB();
+    await db.clear('changeRecords');
   }
 }
 
