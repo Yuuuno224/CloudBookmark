@@ -39,16 +39,50 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'PUSH_NOW') {
+    changeTracker.suppress();
+    syncEngine.push().then(() => {
+      changeTracker.resume();
+      sendResponse({ ok: true });
+    }).catch((err) => {
+      changeTracker.resume();
+      sendResponse({ ok: false, error: err.message });
+    });
+    return true;
+  }
+
+  if (message.type === 'PULL_NOW') {
+    changeTracker.suppress();
+    syncEngine.pull().then((result) => {
+      changeTracker.resume();
+      sendResponse({ ok: true, conflicts: result.conflicts, applied: result.applied });
+    }).catch((err) => {
+      changeTracker.resume();
+      sendResponse({ ok: false, error: err.message });
+    });
+    return true;
+  }
+
   if (message.type === 'GET_SYNC_STATE') {
     localStore.getSyncState().then((state) => sendResponse(state));
     return true;
   }
 
+  if (message.type === 'GET_PENDING_CONFLICTS') {
+    localStore.getPendingConflicts().then((conflicts) => sendResponse({ conflicts: conflicts || [] }));
+    return true;
+  }
+
   if (message.type === 'RESOLVE_CONFLICTS') {
+    changeTracker.suppress();
     syncEngine
       .resolveConflicts(message.resolutions)
-      .then(() => sendResponse({ ok: true }))
+      .then((result) => {
+        changeTracker.resume();
+        sendResponse({ ok: true, applied: result.applied });
+      })
       .catch((err) => {
+        changeTracker.resume();
         sendResponse({ ok: false, error: err.message });
       });
     return true;

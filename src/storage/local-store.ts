@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import type { BookmarkNode, SyncState, Tombstone, ChangeRecord } from '@/types';
+import type { BookmarkNode, SyncState, Tombstone, ChangeRecord, ConflictEntry } from '@/types';
 
 const DB_NAME = 'cloudbookmark';
 const DB_VERSION = 2;
@@ -200,6 +200,21 @@ export class LocalStore {
   async clearChangeRecords(): Promise<void> {
     const db = await getDB();
     await db.clear('changeRecords');
+  }
+
+  async getPendingConflicts(): Promise<ConflictEntry[] | null> {
+    const db = await getDB();
+    const record = await db.get('syncMeta', 'pendingConflicts');
+    return (record?.value as ConflictEntry[]) || null;
+  }
+
+  async setPendingConflicts(conflicts: ConflictEntry[] | null): Promise<void> {
+    const db = await getDB();
+    if (conflicts === null) {
+      await db.delete('syncMeta', 'pendingConflicts');
+    } else {
+      await db.put('syncMeta', { key: 'pendingConflicts', value: conflicts });
+    }
   }
 }
 
