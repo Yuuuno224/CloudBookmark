@@ -15,6 +15,7 @@ export function SyncStatus() {
   const [syncMode, setSyncMode] = createSignal<SyncMode>('merge');
   const [conflicts, setConflicts] = createSignal<ConflictEntry[]>([]);
   const [resolutions, setResolutions] = createSignal<Map<string, 'local' | 'remote' | 'both'>>(new Map());
+  const [opVersion, setOpVersion] = createSignal(0);
 
   const refreshState = async () => {
     try {
@@ -35,50 +36,60 @@ export function SyncStatus() {
     refreshState();
   });
 
-  const handleSync = async () => {
+  const executeOp = async (op: () => Promise<unknown>, onResult?: (resp: unknown) => void) => {
+    if (syncing()) return;
+    const myVersion = opVersion() + 1;
+    setOpVersion(myVersion);
     setSyncing(true);
     try {
-      await chrome.runtime.sendMessage({ type: 'SYNC_NOW' });
+      const resp = await op();
+      if (opVersion() !== myVersion) return;
+      onResult?.(resp);
     } catch { /* ignore */ }
-    setSyncing(false);
-    await refreshState();
+    if (opVersion() === myVersion) {
+      setSyncing(false);
+      await refreshState();
+    }
   };
 
-  const handlePush = async () => {
-    setSyncing(true);
-    try {
-      await chrome.runtime.sendMessage({ type: 'PUSH_NOW' });
-    } catch { /* ignore */ }
-    setSyncing(false);
-    await refreshState();
-  };
+  const handleSync = () => executeOp(
+    () => chrome.runtime.sendMessage({ type: 'SYNC_NOW' }),
+  );
 
-  const handlePull = async () => {
-    setSyncing(true);
-    try {
-      const resp = await chrome.runtime.sendMessage({ type: 'PULL_NOW' });
-      if (resp?.conflicts?.length > 0) {
-        setConflicts(resp.conflicts);
+  const handlePush = () => executeOp(
+    () => chrome.runtime.sendMessage({ type: 'PUSH_NOW' }),
+  );
+
+  const handlePull = () => executeOp(
+    () => chrome.runtime.sendMessage({ type: 'PULL_NOW' }),
+    (resp: unknown) => {
+      const r = resp as { conflicts?: ConflictEntry[] };
+      if (r?.conflicts && r.conflicts.length > 0) {
+        setConflicts(r.conflicts);
         setResolutions(new Map());
       }
-    } catch { /* ignore */ }
-    setSyncing(false);
-    await refreshState();
-  };
+    },
+  );
 
   const handleResolve = async () => {
+    if (syncing()) return;
+    const myVersion = opVersion() + 1;
+    setOpVersion(myVersion);
+    setSyncing(true);
     const resolutionList = Array.from(resolutions().entries()).map(([id, resolution]) => ({
       id,
       resolution,
     }));
-    setSyncing(true);
     try {
       await chrome.runtime.sendMessage({ type: 'RESOLVE_CONFLICTS', resolutions: resolutionList });
+      if (opVersion() !== myVersion) return;
       setConflicts([]);
       setResolutions(new Map());
     } catch { /* ignore */ }
-    setSyncing(false);
-    await refreshState();
+    if (opVersion() === myVersion) {
+      setSyncing(false);
+      await refreshState();
+    }
   };
 
   const setResolution = (id: string, value: 'local' | 'remote' | 'both') => {

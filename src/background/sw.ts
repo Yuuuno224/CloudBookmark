@@ -1,5 +1,5 @@
 import { bookmarkManager } from '@/bookmark';
-import { syncEngine } from '@/sync';
+import { syncEngine, SyncBusyError } from '@/sync';
 import { tokenManager } from '@/auth';
 import { localStore } from '@/storage';
 import { changeTracker } from '@/tracker';
@@ -34,7 +34,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: true });
     }).catch((err) => {
       changeTracker.resume();
-      sendResponse({ ok: false, error: err.message });
+      if (err instanceof SyncBusyError) {
+        sendResponse({ ok: false, error: err.message, busy: true });
+      } else {
+        sendResponse({ ok: false, error: err.message });
+      }
     });
     return true;
   }
@@ -46,7 +50,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: true });
     }).catch((err) => {
       changeTracker.resume();
-      sendResponse({ ok: false, error: err.message });
+      if (err instanceof SyncBusyError) {
+        sendResponse({ ok: false, error: err.message, busy: true });
+      } else {
+        sendResponse({ ok: false, error: err.message });
+      }
     });
     return true;
   }
@@ -58,7 +66,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: true, conflicts: result.conflicts, applied: result.applied });
     }).catch((err) => {
       changeTracker.resume();
-      sendResponse({ ok: false, error: err.message });
+      if (err instanceof SyncBusyError) {
+        sendResponse({ ok: false, error: err.message, busy: true });
+      } else {
+        sendResponse({ ok: false, error: err.message });
+      }
     });
     return true;
   }
@@ -83,7 +95,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })
       .catch((err) => {
         changeTracker.resume();
-        sendResponse({ ok: false, error: err.message });
+        if (err instanceof SyncBusyError) {
+          sendResponse({ ok: false, error: err.message, busy: true });
+        } else {
+          sendResponse({ ok: false, error: err.message });
+        }
       });
     return true;
   }

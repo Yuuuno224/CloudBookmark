@@ -21,6 +21,7 @@ export class BookmarkManager {
   private initialized = false;
   private applyingRemote = false;
   private browserType: BrowserType = 'unknown';
+  #readLock: Promise<void> = Promise.resolve();
 
   private browserToCanonicalId = new Map<string, string>();
   private canonicalToBrowserId = new Map<string, string>();
@@ -54,8 +55,12 @@ export class BookmarkManager {
   }
 
   async readBrowserTree(): Promise<BookmarkTree> {
-    this.browserToCanonicalId.clear();
-    this.canonicalToBrowserId.clear();
+    let resolveLock: () => void;
+    this.#readLock = this.#readLock.then(() => new Promise<void>((r) => { resolveLock = r; }));
+
+    try {
+      this.browserToCanonicalId.clear();
+      this.canonicalToBrowserId.clear();
 
     const [treeResult] = await Promise.all([chrome.bookmarks.getTree()]);
     const root = treeResult[0];
@@ -89,7 +94,10 @@ export class BookmarkManager {
       roots: { bookmark_bar: bookmarkBar, other, mobile },
     };
     tree.checksum = await sha256(JSON.stringify(tree.roots));
-    return tree;
+      return tree;
+    } finally {
+      resolveLock!();
+    }
   }
 
   private defaultRoot(id: string, title: string): BookmarkNode {

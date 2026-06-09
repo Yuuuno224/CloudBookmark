@@ -21,15 +21,22 @@ export class SyncConflictError extends Error {
   }
 }
 
+export class SyncBusyError extends Error {
+  constructor() {
+    super('同步操作正在进行中，请稍后重试');
+    this.name = 'SyncBusyError';
+  }
+}
+
 export interface PullResult {
   conflicts: ConflictEntry[];
   applied: boolean;
 }
 
+type SyncOp = 'sync' | 'push' | 'pull';
+
 export class SyncEngine {
-  #syncPromise: Promise<void> | null = null;
-  #pushPromise: Promise<void> | null = null;
-  #pullPromise: Promise<PullResult> | null = null;
+  #activeOp: SyncOp | null = null;
   private apiClient: GistApiClient | null = null;
 
   private async getApiClient(): Promise<GistApiClient> {
@@ -43,45 +50,50 @@ export class SyncEngine {
     return this.apiClient;
   }
 
+  private acquire(op: SyncOp): void {
+    if (this.#activeOp) throw new SyncBusyError();
+    this.#activeOp = op;
+  }
+
+  private release(): void {
+    this.#activeOp = null;
+  }
+
   async sync(): Promise<void> {
-    if (this.#syncPromise) return this.#syncPromise;
-    this.#syncPromise = this._doSync();
+    this.acquire('sync');
     try {
-      await this.#syncPromise;
+      await this._doSync();
     } finally {
-      this.#syncPromise = null;
+      this.release();
     }
   }
 
   async push(): Promise<void> {
-    if (this.#pushPromise) return this.#pushPromise;
-    this.#pushPromise = this._doPush();
+    this.acquire('push');
     try {
-      await this.#pushPromise;
+      await this._doPush();
     } finally {
-      this.#pushPromise = null;
+      this.release();
     }
   }
 
   async pull(): Promise<PullResult> {
-    if (this.#pullPromise) return this.#pullPromise;
-    this.#pullPromise = this._doPull();
+    this.acquire('pull');
     try {
-      return await this.#pullPromise;
+      return await this._doPull();
     } finally {
-      this.#pullPromise = null;
+      this.release();
     }
   }
 
   async pullWithResolutions(
     resolutions: { id: string; resolution: 'local' | 'remote' | 'both' }[],
   ): Promise<PullResult> {
-    if (this.#pullPromise) return this.#pullPromise;
-    this.#pullPromise = this._doPullWithResolutions(resolutions);
+    this.acquire('pull');
     try {
-      return await this.#pullPromise;
+      return await this._doPullWithResolutions(resolutions);
     } finally {
-      this.#pullPromise = null;
+      this.release();
     }
   }
 
