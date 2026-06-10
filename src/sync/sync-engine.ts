@@ -205,33 +205,12 @@ export class SyncEngine {
 
       const remoteTree = this.parseGistFile<BookmarkTree>(gist, 'bookmarks.json');
       const remoteDeleted = this.parseGistFile<DeletedRecord>(gist, 'deleted.json');
-      const remoteNodes = flattenTree(remoteTree);
-
-      const localTree = await bookmarkManager.getBookmarkTree();
-      const localNodes = flattenTree(localTree);
-
-      const baseNodes = (await localStore.getBaseState()) || [];
-      const syncState = await localStore.getSyncState();
-      const isFirstSync = syncState.lastSyncVersion === null;
-
-      const effectiveBase = isFirstSync && baseNodes.length === 0 ? [] : baseNodes;
-      const result = threeWayMerge(effectiveBase, localNodes, remoteNodes);
-
-      if (result.conflicts.length > 0) {
-        await localStore.setSyncState({
-          status: 'conflict',
-          lastError: `${result.conflicts.length} 个冲突需要解决`,
-        });
-        await localStore.setPendingConflicts(result.conflicts);
-        return { conflicts: result.conflicts, applied: false };
-      }
 
       await this.applyTombstones(remoteDeleted);
 
-      const mergedTree = rebuildTree(result.merged);
-      mergedTree.checksum = await sha256(JSON.stringify(mergedTree.roots));
+      remoteTree.checksum = await sha256(JSON.stringify(remoteTree.roots));
 
-      await bookmarkManager.applyMergedTree(mergedTree);
+      await bookmarkManager.applyMergedTree(remoteTree);
 
       const finalTree = await bookmarkManager.getBookmarkTree();
       const finalNodes = flattenTree(finalTree);

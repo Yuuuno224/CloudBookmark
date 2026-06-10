@@ -155,6 +155,10 @@ export class BookmarkManager {
     try {
       const mergedNodes = this.flattenTree(tree);
       const mergedById = new Map(mergedNodes.map((n) => [n.id, n]));
+      const mergedByUrl = new Map<string, BookmarkNode>();
+      for (const n of mergedNodes) {
+        if (n.url) mergedByUrl.set(n.url, n);
+      }
 
       const existingTree = await this.readBrowserTree();
       const existingNodes = this.flattenTree(existingTree);
@@ -164,13 +168,22 @@ export class BookmarkManager {
         if (n.url) existingByUrl.set(n.url, n);
       }
 
+      const urlToExistingId = new Map<string, string>();
+      for (const existing of existingNodes) {
+        if (existing.url) {
+          urlToExistingId.set(existing.url, existing.id);
+        }
+      }
+
       const toRemove: string[] = [];
       for (const existing of existingNodes) {
-        if (!mergedById.has(existing.id)) {
-          if (!Object.values(ROOT_ID_MAP).includes(existing.id) && existing.parentId) {
-            toRemove.push(existing.id);
-          }
-        }
+        if (Object.values(ROOT_ID_MAP).includes(existing.id) || !existing.parentId) continue;
+
+        if (mergedById.has(existing.id)) continue;
+
+        if (existing.url && mergedByUrl.has(existing.url)) continue;
+
+        toRemove.push(existing.id);
       }
 
       for (const canonicalId of toRemove) {
@@ -190,9 +203,11 @@ export class BookmarkManager {
         .sort((a, b) => (a.parentId ? 0 : -1) - (b.parentId ? 0 : -1));
       const bookmarks = mergedNodes.filter((n) => n.type === 'bookmark');
 
+      const folderIdAlias = new Map<string, string>();
+
       for (const folder of folders) {
         const browserParentId = folder.parentId
-          ? this.toBrowserId(folder.parentId)
+          ? this.toBrowserId(folder.parentId) || this.toBrowserId(folderIdAlias.get(folder.parentId) || folder.parentId)
           : this.toBrowserId('bookmark_bar');
 
         if (existingById.has(folder.id)) {
@@ -211,6 +226,7 @@ export class BookmarkManager {
               title: folder.title,
             });
             this.mapId(result.id, folder.id);
+            folderIdAlias.set(folder.id, folder.id);
           } catch { /* parent may not exist yet */ }
         }
       }
@@ -218,22 +234,23 @@ export class BookmarkManager {
       for (const bm of bookmarks) {
         if (bm.url && existingByUrl.has(bm.url)) {
           const existingDupe = existingByUrl.get(bm.url)!;
-          if (existingById.has(bm.id) && existingDupe.id === bm.id) {
-            const browserId = this.toBrowserId(bm.id);
-            const existing = existingById.get(bm.id)!;
-            const updates: { title?: string; url?: string } = {};
-            if (existing.title !== bm.title) updates.title = bm.title;
-            if (existing.url !== bm.url && bm.url) updates.url = bm.url;
-            if (updates.title || updates.url) {
-              try { await chrome.bookmarks.update(browserId, updates); } catch { /* skip */ }
-            }
-            if (existing.parentId !== bm.parentId) {
-              const browserParentId = bm.parentId
-                ? this.toBrowserId(bm.parentId)
-                : this.toBrowserId('bookmark_bar');
-              try { await chrome.bookmarks.move(browserId, { parentId: browserParentId }); } catch { /* skip */ }
-            }
+          const browserId = this.toBrowserId(existingDupe.id);
+          const existing = existingById.get(existingDupe.id)!;
+          const updates: { title?: string; url?: string } = {};
+          if (existing.title !== bm.title) updates.title = bm.title;
+          if (existing.url !== bm.url && bm.url) updates.url = bm.url;
+          if (updates.title || updates.url) {
+            try { await chrome.bookmarks.update(browserId, updates); } catch { /* skip */ }
           }
+
+          const targetParentId = bm.parentId
+            ? this.toBrowserId(bm.parentId)
+            : this.toBrowserId('bookmark_bar');
+          if (targetParentId && existing.parentId !== bm.parentId) {
+            try { await chrome.bookmarks.move(browserId, { parentId: targetParentId }); } catch { /* skip */ }
+          }
+
+          this.mapId(this.toBrowserId(existingDupe.id), bm.id);
           continue;
         }
 
