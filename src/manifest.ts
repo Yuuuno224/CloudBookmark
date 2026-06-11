@@ -4,7 +4,7 @@ export default defineManifest({
   manifest_version: 3,
   name: 'CloudBookmark',
   description: '基于 GitHub Gist 的浏览器书签云端同步扩展',
-  version: '1.0.0',
+  version: '2.0.0',
   permissions: ['bookmarks', 'storage', 'alarms'],
   background: {
     service_worker: 'src/background/sw.ts',
