@@ -6,12 +6,14 @@
 
 - **零服务器成本** — 数据存储在 GitHub Gist，无需自建后端
 - **跨浏览器** — 支持 Google Chrome 与 Microsoft Edge
-- **手动同步** — 按需触发同步，避免自动同步导致的数据冲突
-- **三向合并** — 基于基准态的增量合并，多端数据并存不覆盖
+- **双模式同步** — 合并同步（三向合并）与拆分上传/下载（覆盖式）两种模式
+- **冲突交互解决** — 同步冲突时弹出界面，逐项选择保留本地/使用远端/保留两者
 - **URL 去重** — 相同 URL 的书签不会重复添加
+- **变更记录** — 追踪书签的创建、删除、更新、移动操作，支持统计
 - **版本历史** — Gist 天然支持 Git 版本历史，可回溯任意版本
 - **数据自主** — 数据存储在用户自己的 GitHub 账号下，完全可控
 - **Token 安全** — AES-GCM 加密存储，仅请求 gist 最小权限
+- **竞态安全** — 互斥锁 + 版本守卫，防止快速连续点击导致状态异常
 
 ## 安装
 
@@ -40,7 +42,7 @@ npm run build
 1. 点击扩展图标，进入设置页
 2. 输入 GitHub Personal Access Token（仅需 `gist` 权限）
 3. 点击 **保存并验证**
-4. 切换到书签页，点击 **立即同步** 按钮执行同步
+4. 切换到书签页，选择同步模式并执行操作
 
 ### 创建 GitHub Token
 
@@ -49,18 +51,36 @@ npm run build
 3. 仅勾选 `gist` 权限
 4. 生成并复制 Token
 
-## 同步机制
+## 同步模式
 
-采用**手动同步 + 三向合并**策略：
+### 合并同步
 
-1. 用户点击"立即同步"触发
-2. 读取远端 Gist 数据（remote）和本地浏览器书签（local）
-3. 读取上次同步基准态（base）
-4. 执行三向合并：`merge(base, local, remote)` → 合并结果
-5. 将合并结果应用到本地浏览器并推送到 Gist
-6. 更新 base 为当前状态
+采用**手动触发 + 三向合并**策略：
 
-**冲突处理**：当同一书签在两端被修改时，按 `updatedAt` 时间戳采用 Last-Write-Wins 策略自动解决。
+1. 读取远端 Gist 数据（remote）和本地浏览器书签（local）
+2. 读取上次同步基准态（base）
+3. 执行三向合并：`merge(base, local, remote)` → 合并结果
+4. 将合并结果应用到本地浏览器并推送到 Gist
+5. 更新 base 为当前状态
+
+冲突时按 `updatedAt` 时间戳 Last-Write-Wins 自动解决，或暂停等待用户选择。
+
+### 拆分上传/下载
+
+独立的单向覆盖操作，不做合并：
+
+- **上传** — 将本地书签树完整覆盖到 Gist
+- **下载** — 将远端书签树完整覆盖到本地浏览器
+
+适合需要强制同步一端数据的场景。
+
+### 冲突解决
+
+当合并同步或下载检测到冲突时，弹出冲突解决界面：
+
+- 每个冲突项并排展示本地与远端内容
+- 三种选择：**保留本地** / **使用远端** / **保留两者**
+- 全部选择后点击"应用选择"提交
 
 ## 跨浏览器兼容
 
@@ -78,12 +98,11 @@ npm run build
 |------|------|
 | 语言 | TypeScript |
 | UI 框架 | Solid.js |
-| 构建 | Vite + CRXJS |
+| 构建 | Vite 8 + CRXJS 2.4 |
 | 样式 | TailwindCSS |
 | 扩展标准 | Chrome Manifest V3 |
 | 本地存储 | IndexedDB (via idb) |
 | 加密 | Web Crypto API (AES-GCM + PBKDF2) |
-| 状态管理 | Zustand |
 
 ## 开发
 
@@ -110,8 +129,10 @@ src/
 ├── bookmark/       # 浏览器书签读写与适配
 ├── background/     # Service Worker
 ├── popup/          # Solid.js UI 界面
+│   └── components/ # BookmarkList / SyncStatus / ChangeLog / Settings
 ├── storage/        # IndexedDB 本地存储
-├── sync/           # 同步引擎与三向合并
+├── sync/           # 同步引擎（sync/push/pull）与三向合并
+├── tracker/        # 变更记录追踪
 ├── types/          # TypeScript 类型定义
 └── utils/          # 工具函数
 ```
