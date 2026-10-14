@@ -39,9 +39,17 @@ export default {
         /** 弱化文字：时间戳、辅助说明 */
         'ink-faint': 'var(--cb-ink-faint)',
 
-        /** 主色：按钮、链接 */
-        brand: 'var(--cb-brand)',
-        'brand-hover': 'var(--cb-brand-hover)',
+        /**
+         * 主色：按钮、链接、输入框聚焦光圈。
+         *
+         * 注意这里用的是 `rgb(var(--xxx) / <alpha-value>)` 而不是直接 `var(--xxx)`。
+         * 原因是 Tailwind 只有在颜色写成 rgb 分量 + <alpha-value> 时，
+         * 才支持透明度修饰符（`ring-brand/25`、`bg-brand/50` 这种写法）。
+         * 直接写 `var(--cb-brand)` 的话，`ring-brand/25` 会**一个字的 CSS 都不生成**，
+         * 而且不报任何错——非常难查。
+         */
+        brand: 'rgb(var(--cb-brand-rgb) / <alpha-value>)',
+        'brand-hover': 'rgb(var(--cb-brand-hover-rgb) / <alpha-value>)',
 
         /** 信息色（蓝）—— 也用于冲突对比里的"本地"一列 */
         'accent-soft': 'var(--cb-accent-soft)',

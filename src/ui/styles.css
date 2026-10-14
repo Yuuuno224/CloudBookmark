@@ -31,8 +31,8 @@
   --cb-ink-soft: #475569;
   --cb-ink-faint: #94a3b8;
 
-  --cb-brand: #2563eb;
-  --cb-brand-hover: #1d4ed8;
+  --cb-brand-rgb: 37 99 235;
+  --cb-brand-hover-rgb: 29 78 216;
 
   --cb-accent-soft: #eff6ff;
   --cb-accent-ink: #1e40af;
@@ -64,8 +64,8 @@
     --cb-ink-soft: #cbd5e1;
     --cb-ink-faint: #94a3b8;
 
-    --cb-brand: #3b82f6;
-    --cb-brand-hover: #60a5fa;
+    --cb-brand-rgb: 59 130 246;
+    --cb-brand-hover-rgb: 96 165 250;
 
     --cb-accent-soft: rgba(59, 130, 246, 0.16);
     --cb-accent-ink: #93c5fd;
@@ -97,8 +97,8 @@
   --cb-ink-soft: #cbd5e1;
   --cb-ink-faint: #94a3b8;
 
-  --cb-brand: #3b82f6;
-  --cb-brand-hover: #60a5fa;
+  --cb-brand-rgb: 59 130 246;
+  --cb-brand-hover-rgb: 96 165 250;
 
   --cb-accent-soft: rgba(59, 130, 246, 0.16);
   --cb-accent-ink: #93c5fd;
