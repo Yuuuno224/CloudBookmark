@@ -1,25 +1,25 @@
 {
   "name": "cloud-bookmark",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
+  "description": "把浏览器书签同步到你自己的 GitHub Gist",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "idb": "^8.0.0",
-    "solid-js": "^1.9.0",
-    "zustand": "^5.0.0"
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.4.0",
     "@types/chrome": "^0.0.268",
     "autoprefixer": "^10.4.19",
-    "eslint": "^9.0.0",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.5.0",
