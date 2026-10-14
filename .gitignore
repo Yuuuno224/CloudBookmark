@@ -5,3 +5,6 @@ dist/
 *.log
 .env
 .env.*
+
+# 本地代码图谱工具生成的缓存（不属于项目源码）
+.codegraph/

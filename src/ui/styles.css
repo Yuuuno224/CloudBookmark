@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * 主题变量
+ * ========
+ *
+ * 所有颜色都在这个文件里定义，组件只引用变量名（bg-surface、text-ink…）。
+ * 想调配色？只改这里就够了。
+ *
+ * 三种状态：
+ *   1. <html> 上没有任何类      → 跟随系统（下面那条 @media 生效）
+ *   2. <html class="light">     → 强制浅色
+ *   3. <html class="dark">      → 强制深色
+ *
+ * ⚠ 顺序很重要：.dark 那段必须写在 @media 之后。
+ *   两者选择器优先级相同（都是 0,2,0），所以后写的赢；
+ *   如果写在前面，"系统是深色但用户手动选了浅色"就会失效。
+ */
+
+:root {
+  color-scheme: light;
+
+  --cb-surface: #ffffff;
+  --cb-surface-sunken: #f8fafc;
+  --cb-surface-raised: #f1f5f9;
+  --cb-line: #e2e8f0;
+
+  --cb-ink: #1e293b;
+  --cb-ink-soft: #475569;
+  --cb-ink-faint: #94a3b8;
+
+  --cb-brand-rgb: 37 99 235;
+  --cb-brand-hover-rgb: 29 78 216;
+
+  --cb-accent-soft: #eff6ff;
+  --cb-accent-ink: #1e40af;
+  --cb-accent-line: #bfdbfe;
+  --cb-alt-soft: #f5f3ff;
+  --cb-alt-ink: #5b21b6;
+  --cb-alt-line: #ddd6fe;
+  --cb-warn-soft: #fffbeb;
+  --cb-warn-ink: #92400e;
+  --cb-warn-line: #fde68a;
+  --cb-danger-soft: #fef2f2;
+  --cb-danger-ink: #991b1b;
+  --cb-danger-line: #fecaca;
+  --cb-success-soft: #ecfdf5;
+  --cb-success-ink: #065f46;
+  --cb-success-line: #a7f3d0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+
+    --cb-surface: #1e293b;
+    --cb-surface-sunken: #0f172a;
+    --cb-surface-raised: #334155;
+    --cb-line: #334155;
+
+    --cb-ink: #f1f5f9;
+    --cb-ink-soft: #cbd5e1;
+    --cb-ink-faint: #94a3b8;
+
+    --cb-brand-rgb: 59 130 246;
+    --cb-brand-hover-rgb: 96 165 250;
+
+    --cb-accent-soft: rgba(59, 130, 246, 0.16);
+    --cb-accent-ink: #93c5fd;
+    --cb-accent-line: rgba(59, 130, 246, 0.35);
+    --cb-alt-soft: rgba(139, 92, 246, 0.16);
+    --cb-alt-ink: #c4b5fd;
+    --cb-alt-line: rgba(139, 92, 246, 0.35);
+    --cb-warn-soft: rgba(245, 158, 11, 0.16);
+    --cb-warn-ink: #fcd34d;
+    --cb-warn-line: rgba(245, 158, 11, 0.35);
+    --cb-danger-soft: rgba(239, 68, 68, 0.16);
+    --cb-danger-ink: #fca5a5;
+    --cb-danger-line: rgba(239, 68, 68, 0.35);
+    --cb-success-soft: rgba(16, 185, 129, 0.16);
+    --cb-success-ink: #6ee7b7;
+    --cb-success-line: rgba(16, 185, 129, 0.35);
+  }
+}
+
+:root.dark {
+  color-scheme: dark;
+
+  --cb-surface: #1e293b;
+  --cb-surface-sunken: #0f172a;
+  --cb-surface-raised: #334155;
+  --cb-line: #334155;
+
+  --cb-ink: #f1f5f9;
+  --cb-ink-soft: #cbd5e1;
+  --cb-ink-faint: #94a3b8;
+
+  --cb-brand-rgb: 59 130 246;
+  --cb-brand-hover-rgb: 96 165 250;
+
+  --cb-accent-soft: rgba(59, 130, 246, 0.16);
+  --cb-accent-ink: #93c5fd;
+  --cb-accent-line: rgba(59, 130, 246, 0.35);
+  --cb-alt-soft: rgba(139, 92, 246, 0.16);
+  --cb-alt-ink: #c4b5fd;
+  --cb-alt-line: rgba(139, 92, 246, 0.35);
+  --cb-warn-soft: rgba(245, 158, 11, 0.16);
+  --cb-warn-ink: #fcd34d;
+  --cb-warn-line: rgba(245, 158, 11, 0.35);
+  --cb-danger-soft: rgba(239, 68, 68, 0.16);
+  --cb-danger-ink: #fca5a5;
+  --cb-danger-line: rgba(239, 68, 68, 0.35);
+  --cb-success-soft: rgba(16, 185, 129, 0.16);
+  --cb-success-ink: #6ee7b7;
+  --cb-success-line: rgba(16, 185, 129, 0.35);
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--cb-surface-sunken);
+  color: var(--cb-ink);
+}
+
+/* 让滚动条细一点，弹窗里不显得笨重 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cb-ink-faint) transparent;
+}
+
+/* 主题切换时不要有拖泥带水的过渡动画（只有在切换后极短时间内生效） */
+.theme-switching * {
+  transition: none !important;
+}
