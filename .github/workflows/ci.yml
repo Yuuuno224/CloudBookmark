@@ -17,8 +17,10 @@ jobs:
           node-version: 20
           cache: npm
 
-      # 用 npm install 而不是 npm ci：依赖有变动时 lock 文件需要本地跑一次
-      # npm install 刷新，install 不会因为不同步而直接失败。
+      # 用 npm install 而不是 npm ci：仓库里的 package-lock.json 是在没有网络
+      # 的环境下、由本地 node_modules 生成的，只固定了版本号，缺少 resolved /
+      # integrity 字段，npm ci 会因此报错。在有网络的环境跑一次 npm install
+      # 就会补全这些字段，之后可以放心换成 npm ci。
       # 详见 docs/06-开发调试指南.md
       - run: npm install --no-audit --no-fund
 

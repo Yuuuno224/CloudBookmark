@@ -18,6 +18,7 @@ jobs:
           node-version: 20
           cache: npm
 
+      # 同 ci.yml：锁文件目前缺少 resolved/integrity，用 npm install 更稳妥
       - run: npm install --no-audit --no-fund
 
       - run: npm run typecheck
