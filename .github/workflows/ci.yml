@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,20 +15,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - run: rm -f package-lock.json
+      # 用 npm install 而不是 npm ci：依赖有变动时 lock 文件需要本地跑一次
+      # npm install 刷新，install 不会因为不同步而直接失败。
+      # 详见 docs/06-开发调试指南.md
+      - run: npm install --no-audit --no-fund
 
-      - run: npm install --legacy-peer-deps
+      - name: 类型检查
+        run: npm run typecheck
 
-      - name: Verify native bindings
+      - name: 单元测试与端到端仿真
+        run: npm test
+
+      - name: 生产构建
+        run: npm run build
+
+      - name: 检查构建产物是否完整
         run: |
-          test -d node_modules/rolldown || (echo "rolldown missing" && exit 1)
-          test -d node_modules/lightningcss || (echo "lightningcss missing" && exit 1)
-          echo "Native bindings OK"
-
-      - run: npm run typecheck
-
-      - run: npm run build
+          set -e
+          for f in dist/manifest.json \
+                   dist/service-worker-loader.js \
+                   dist/src/ui/popup/index.html \
+                   dist/src/ui/options/index.html \
+                   dist/icons/icon128.png; do
+            test -f "$f" || { echo "缺少构建产物: $f"; exit 1; }
+          done
+          echo "构建产物完整"
 
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
