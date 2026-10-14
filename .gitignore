@@ -8,3 +8,18 @@ dist/
 
 # 本地代码图谱工具生成的缓存（不属于项目源码）
 .codegraph/
+
+# 故意不提交锁文件。
+#
+# 原因：Vite 8 依赖 rolldown，Tailwind/PostCSS 依赖 lightningcss，这两个包都会
+# 按平台安装不同的**原生二进制**（@rolldown/binding-linux-x64-gnu、
+# lightningcss-win32-x64-msvc 之类）。在一台机器上生成的 package-lock.json
+# 只会记下那一台机器的原生包，于是「Windows 上生成的锁文件」会让 Linux 上的 CI
+# 装不到 Linux 版二进制，vitest / vite 一启动就报
+#   Cannot find module '../rolldown-binding.linux-x64-gnu.node'
+#
+# 不提交锁文件时，每台机器（以及 CI）的 npm install 都会各自解析出自己平台需要的
+# 原生包。这是最省事的做法，也是这个仓库一直以来的做法。
+# 若确实想要可复现的安装：在 Linux 机器上跑一次 npm install 生成锁文件再提交，
+# 那一次的锁文件会同时记录所有平台的原生包。
+package-lock.json

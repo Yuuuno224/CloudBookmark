@@ -13,18 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 同 ci.yml：不加 `cache: npm`，因为仓库故意不提交 package-lock.json
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      # 同 ci.yml：锁文件目前缺少 resolved/integrity，用 npm install 更稳妥
       - run: npm install --no-audit --no-fund
 
-      - name: 环境信息
+      - name: 环境与原生模块检查
         run: |
-          echo "node       : $(node -v)"
-          echo "vitest bin : $([ -x node_modules/.bin/vitest ] && echo 存在 || echo 缺失)"
+          echo "::notice title=环境::node $(node -v) / npm $(npm -v)"
+          node --input-type=module -e "await import('rolldown'); console.log('rolldown 可加载')"
+          node --input-type=module -e "await import('lightningcss'); console.log('lightningcss 可加载')"
 
       - run: npm run typecheck
 
