@@ -24,11 +24,29 @@ jobs:
       # 详见 docs/06-开发调试指南.md
       - run: npm install --no-audit --no-fund
 
+      - name: 环境信息
+        run: |
+          echo "node        : $(node -v)"
+          echo "npm         : $(npm -v)"
+          echo "vitest bin  : $([ -x node_modules/.bin/vitest ] && echo 存在 || echo 缺失)"
+          echo "vite engines: $(node -e "console.log(require('./node_modules/vite/package.json').engines.node)" 2>&1)"
+
       - name: 类型检查
         run: npm run typecheck
 
       - name: 单元测试与端到端仿真
-        run: npm test
+        run: |
+          # 失败时把原因也写成一条 annotation，这样在 Actions 页面之外也能看到
+          set +e
+          npm test > /tmp/vitest.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            summary=$(tail -c 1800 /tmp/vitest.log | tr '\n' '~' | tr -d '%' | cut -c1-1400)
+            echo "::error title=vitest 退出码 $code::$summary"
+            cat /tmp/vitest.log
+            exit $code
+          fi
+          tail -c 400 /tmp/vitest.log
 
       - name: 生产构建
         run: npm run build
